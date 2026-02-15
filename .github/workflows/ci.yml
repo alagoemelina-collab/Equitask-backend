@@ -1,0 +1,16 @@
+name: CI Check
+
+on:
+  push:
+    branches:
+      - dev
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Basic Repo Check
+        run: echo "CI is running successfully"
