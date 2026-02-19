@@ -9,8 +9,16 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    env:
+      MONGO_URI: ${{ secrets.MONGO_URI }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      PORT: ${{ secrets.PORT }}
+
     steps:
       - uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: npm install
 
       - name: Basic Repo Check
         run: echo "CI is running successfully"
