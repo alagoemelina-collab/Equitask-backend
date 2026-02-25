@@ -1,63 +1,78 @@
 const mongoose = require('mongoose');
  
-const taskSchema = new mongoose.Schema({
-  title: { 
-    type: String,
-    required: [true, 'Task title is required'],
-    trim: true,
-    maxlength: [200, 'Title cannot exceed 200 characters']
-  },
-  
-  description: { 
-    type: String,
-    trim: true,
-    maxlength: [2000, 'Description cannot exceed 2000 characters']
-  },
-  
-  assignedTo: { 
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    default: null
-  },
-  
-  createdBy: { 
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
-  },
-  
-  dueDate: { 
-    type: Date,
-    default: null
-  },
-  
-  status: { 
-    type: String,
-    enum: {
-      values: ['not_started', 'in_progress', 'completed'],
-      message: '{VALUE} is not a valid status'
+const stepSchema = new mongoose.Schema(
+  {
+    stepNumber: {
+      type: Number,
+      required: true
     },
-    default: 'not_started'
-  },
-  
-  urgencyColor: { 
-    type: String,
-    enum: {
-      values: ['red', 'yellow', 'green'],
-      message: '{VALUE} is not a valid urgency color'
+    stepDescription: {
+      type: String,
+      required: true,
+      trim: true
     },
-    default: 'yellow'
-  }
-}, { 
-  timestamps: true
-});
+    isCompleted: {
+      type: Boolean,
+      default: false
+    }
+  },
+  { _id: false }
+);
  
-taskSchema.index({ assignedTo: 1, status: 1 });
-taskSchema.index({ createdBy: 1 });
-taskSchema.index({ dueDate: 1 });
+const taskSchema = new mongoose.Schema(
+  {
+    title: {
+      type: String,
+      required: true,
+      trim: true
+    },
+ 
+    description: {
+      type: String,
+      required: true,
+      trim: true
+    },
+ 
+    status: {
+      type: String,
+      enum: ['not_started', 'in_progress', 'completed'],
+      default: 'not_started'
+    },
+ 
+    urgencyColor: {
+      type: String,
+      enum: ['red', 'yellow', 'green'],
+      default: 'green'
+    },
+ 
+    category: {
+      type: String,
+      default: 'general'
+    },
+ 
+    dueDate: {
+      type: Date
+    },
+ 
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true
+    },
+ 
+    assignedTo: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+ 
+    // 🔥 AI Generated Breakdown
+    simplifiedSteps: {
+      type: [stepSchema],
+      default: []
+    }
+  },
+  { timestamps: true }
+);
  
 module.exports = mongoose.model('Task', taskSchema);
-// assignedTo = Who should do this task
-// ObjectId = Reference to a User's _id
-// ref: 'User' = Links to User model
-// default: null = Can be empty (personal task)
+ 
