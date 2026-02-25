@@ -39,6 +39,15 @@ const userSchema = new mongoose.Schema({
   timestamps: true
 });
  
+//helps you hash the password automatically before saving the user to the database. This way, you never store plain text passwords, and it ensures that all passwords are hashed consistently. The check for `isModified("password")` ensures that we only hash the password if it has been changed, which is important for updates where the password might not be modified.
+ userSchema.pre("save", async function () {
+  // Only hash if password is modified
+  if (!this.isModified("password")) return;
+ 
+  const salt = await bcrypt.genSalt(10);
+  this.password = await bcrypt.hash(this.password, salt);
+});
+ 
  
    
  

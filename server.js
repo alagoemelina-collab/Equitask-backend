@@ -5,6 +5,8 @@ const dotenv = require('dotenv');
  
 dotenv.config();
  
+const proofRoutes = require('./routes/proof');
+const notificationRoutes = require('./routes/notifications');
 const focusRoutes = require('./routes/focus');
 const authRoutes = require('./routes/auth');
 const taskRoutes = require('./routes/tasks');
@@ -43,12 +45,17 @@ app.get('/', (req, res) => {
   });
 });
  
+
+app.use('/api/proof', proofRoutes);
+app.use('/api/notifications', notificationRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/tasks', taskRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/focus', focusRoutes);
 app.use('/api/2fa', twoFactorRoutes);
- 
+
+app.use("/uploads", express.static("uploads"));
+
 app.use((req, res) => {
   res.status(404).json({
     success: false,
