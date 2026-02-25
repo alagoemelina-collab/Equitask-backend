@@ -2,6 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
+const morgan = require('morgan');
  
 dotenv.config();
  
@@ -10,6 +11,7 @@ const taskRoutes = require('./routes/tasks');
 const connectDB = require('./config/database');
  
 const app = express();
+app.use(morgan('dev')); 
  
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
