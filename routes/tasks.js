@@ -39,14 +39,14 @@ router.post('/', async (req, res) => {
       { path: 'createdBy', select: 'email role' }
     ]);
  
-    res.status(200).json({
+    res.status(201).json({
       success: true,
-      message: 'Task updated successfully',
+      message: 'Task created successfully',
       task
     });
  
   } catch (error) {
-    console.error('Update Task Error:', error);
+    console.error('Create Task Error:', error);
     
     if (error.name === 'CastError') {
       return res.status(404).json({
@@ -62,6 +62,213 @@ router.post('/', async (req, res) => {
     });
   }
 });
+
+router.get('/', async (req, res) => {
+  try {
+ 
+    let filter = {};
+ 
+    if (req.user.role === 'manager') {
+      filter = {};
+    } else if (req.user.role === 'employee') {
+      filter = { assignedTo: req.user._id };
+    } else {
+      filter = { createdBy: req.user._id };
+    }
+ 
+    const tasks = await Task.find(filter)
+      .populate([
+        { path: 'assignedTo', select: 'email role' },
+        { path: 'createdBy', select: 'email role' }
+      ])
+      .sort({ createdAt: -1 });
+ 
+    res.status(200).json({
+      success: true,
+      count: tasks.length,
+      tasks
+    });
+ 
+  } catch (error) {
+    console.error('Get Tasks Error:', error);
+ 
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+});
+ 
+
+// GET /api/tasks/:taskId  -> single task + progress
+router.get('/:taskId', async (req, res) => {
+  try {
+    const { taskId } = req.params;
+ 
+    const task = await Task.findById(taskId)
+      .populate('assignedTo', 'email role')
+      .populate('createdBy', 'email role');
+ 
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        message: 'Task not found'
+      });
+    }
+ 
+    const totalSteps = task.simplifiedSteps?.length || 0;
+    const completedSteps = (task.simplifiedSteps || []).filter(
+      step => step.isCompleted
+    ).length;
+ 
+    const progress =
+      totalSteps === 0
+        ? 0
+        : Math.round((completedSteps / totalSteps) * 100);
+ 
+    return res.json({
+      success: true,
+      task,
+      progress
+    });
+ 
+  } catch (error) {
+    console.error('GET single task error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+});
+ 
+
+// PATCH - Mark step as completed
+router.patch('/:taskId/steps/:stepNumber', async (req, res) => {
+  try {
+    const { taskId, stepNumber } = req.params;
+    const { isCompleted } = req.body;
+ 
+    const task = await Task.findById(taskId);
+    if (!task) {
+      return res.status(404).json({ success: false, message: 'Task not found' });
+    }
+ 
+    const step = task.simplifiedSteps.find(
+      s => s.stepNumber === parseInt(stepNumber)
+    );
+ 
+    if (!step) {
+      return res.status(404).json({ success: false, message: 'Step not found' });
+    }
+ 
+    step.isCompleted = isCompleted;
+    await task.save();
+
+ 
+    // res.json({ success: true, task });
+    // ✅ Calculate progress
+const totalSteps = task.simplifiedSteps.length;
+const completedSteps = task.simplifiedSteps.filter(
+  s => s.isCompleted
+).length;
+ 
+const progress = totalSteps === 0
+  ? 0
+  : Math.round((completedSteps / totalSteps) * 100);
+ 
+return res.json({
+  success: true,
+  task,
+  progress
+});
+ 
+ 
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+ 
+
+router.get('/:id', async (req, res) => {
+  try {
+ 
+    const task = await Task.findById(req.params.id)
+      .populate([
+        { path: 'assignedTo', select: 'email role' },
+        { path: 'createdBy', select: 'email role' }
+      ]);
+ 
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        message: 'Task not found'
+      });
+    }
+ 
+    res.status(200).json({
+      success: true,
+      task
+    });
+ 
+  } catch (error) {
+    console.error('Get Single Task Error:', error);
+ 
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+});
+ 
+
+
+router.put('/:id', async (req, res) => {
+  try {
+ 
+    const { title, description, dueDate, urgencyColor, status } = req.body;
+ 
+    const task = await Task.findById(req.params.id);
+ 
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        message: 'Task not found'
+      });
+    }
+ 
+    // Update only fields that were sent
+    if (title) task.title = title;
+    if (description) task.description = description;
+    if (dueDate) task.dueDate = dueDate;
+    if (urgencyColor) task.urgencyColor = urgencyColor;
+    if (status) task.status = status;
+ 
+    await task.save();
+ 
+    await task.populate([
+      { path: 'assignedTo', select: 'email role' },
+      { path: 'createdBy', select: 'email role' }
+    ]);
+ 
+    res.status(200).json({
+      success: true,
+      message: 'Task updated successfully',
+      task
+    });
+ 
+  } catch (error) {
+    console.error('Update Task Error:', error);
+ 
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+});
+// Bot Verification
+ 
+
+
  
 router.delete('/:id', authorize('manager'), async (req, res) => {
   try {

@@ -1,30 +1,56 @@
- const mongoose = require('mongoose');
+const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
  
 const userSchema = new mongoose.Schema({
-  email: { 
+  email: {
     type: String,
-    required: true,
+    required: [true, 'Email is required'],
     unique: true,
     lowercase: true,
     trim: true,
-    match: [/^\S+@\S+\.\S+$/, 'Please enter a valid email']
+    match: [/^\S+@\S+\.\S+$/, 'Please provide a valid email']
   },
-  
-  password: { 
+  password: {
     type: String,
     required: [true, 'Password is required'],
-    minlength: [6, 'Password must be at least 6 characters']
+    minlength: [6, 'Password must be at least 6 characters'],
+    select: false
   },
-  
-  role: { 
+  role: {
     type: String,
     enum: ['manager', 'employee', 'regular'],
-    required: [true, 'Role is required'],
     default: 'regular'
+  },
+  phone: {
+    type: String,
+    trim: true
+  },
+  
+  // 2FA FIELDS - TOTP (Authenticator App)
+  twoFactorEnabled: {
+    type: Boolean,
+    default: false
+  },
+  twoFactorSecret: {
+    type: String,
+    select: false // Don't return by default for security
   }
-}, { 
+}, {
   timestamps: true
 });
  
+//helps you hash the password automatically before saving the user to the database. This way, you never store plain text passwords, and it ensures that all passwords are hashed consistently. The check for `isModified("password")` ensures that we only hash the password if it has been changed, which is important for updates where the password might not be modified.
+ userSchema.pre("save", async function () {
+  // Only hash if password is modified
+  if (!this.isModified("password")) return;
+ 
+  const salt = await bcrypt.genSalt(10);
+  this.password = await bcrypt.hash(this.password, salt);
+});
+ 
+ 
+   
+ 
 module.exports = mongoose.model('User', userSchema);
+// bcrypt.compare
  
