@@ -5,68 +5,74 @@ const { protect, authorize } = require('../middleware/auth');
  
 router.use(protect);
  
-router.post('/', async (req, res) => {
+
+router.post("/", async (req, res) => {
   try {
-    const { title, description, assignedTo, dueDate, urgencyColor } = req.body;
+    const { title, description, assignedTo, dueDate, urgencyColor, status } = req.body;
  
-    if (!title) {
+    if (!title || !title.trim()) {
       return res.status(400).json({
         success: false,
-        message: 'Task title is required'
+        message: "Task title is required",
       });
     }
  
-    let finalAssignedTo;
+    // Must have org (especially for employee)
+    if (!req.user.organizationId) {
+      return res.status(403).json({
+        success: false,
+        message: "Not part of an organization",
+      });
+    }
  
-    if (req.user.role === 'manager') {
-      finalAssignedTo = assignedTo || null;
-    } else if (req.user.role === 'employee') {
-      finalAssignedTo = req.user._id;
-    } else {
-      finalAssignedTo = req.user._id;
+    // Decide who task is assigned to:
+    // - manager: can assign to anyone (if provided)
+    // - employee/regular: assigned to self
+    let finalAssignedTo = req.user._id;
+ 
+    if (req.user.role === "manager") {
+      finalAssignedTo = assignedTo || null; // manager can set or leave unassigned
     }
  
     const task = await Task.create({
-      title,
+      title: title.trim(),
       description,
       assignedTo: finalAssignedTo,
       createdBy: req.user._id,
       dueDate,
-      urgencyColor: urgencyColor || 'yellow'
+      urgencyColor: urgencyColor || "yellow",
+      status,
+      organizationId: req.user.organizationId, // IMPORTANT (org-scoped)
     });
- await task.populate([
-      { path: 'assignedTo', select: 'email role' },
-      { path: 'createdBy', select: 'email role' }
+ 
+    await task.populate([
+      { path: "assignedTo", select: "email role" },
+      { path: "createdBy", select: "email role" },
     ]);
  
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
-      message: 'Task created successfully',
-      task
+      message: "Task created successfully",
+      task,
     });
  
   } catch (error) {
-    console.error('Create Task Error:', error);
-    
-    if (error.name === 'CastError') {
-      return res.status(404).json({
-        success: false,
-        message: 'Task not found'
-      });
-    }
-    
-    res.status(500).json({
+    console.error("Create Task Error:", error);
+ 
+    return res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      message: "Server error",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 });
+ 
+
 
 router.get('/', async (req, res) => {
   try {
  
-    let filter = {};
+    let filter = {organizationId: req.user.organizationId}; // Base filter for org
  
     if (req.user.role === 'manager') {
       filter = {};
@@ -76,7 +82,7 @@ router.get('/', async (req, res) => {
       filter = { createdBy: req.user._id };
     }
  
-    const tasks = await Task.find(filter)
+    const tasks = await Task.find({organizationId: req.user.organizationId})
       .populate([
         { path: 'assignedTo', select: 'email role' },
         { path: 'createdBy', select: 'email role' }
@@ -105,7 +111,7 @@ router.get('/:taskId', async (req, res) => {
   try {
     const { taskId } = req.params;
  
-    const task = await Task.findById(taskId)
+    const task = await Task.findOne({ _id: taskId, organizationId: req.user.organizationId })
       .populate('assignedTo', 'email role')
       .populate('createdBy', 'email role');
  
@@ -148,7 +154,7 @@ router.patch('/:taskId/steps/:stepNumber', async (req, res) => {
     const { taskId, stepNumber } = req.params;
     const { isCompleted } = req.body;
  
-    const task = await Task.findById(taskId);
+    const task = await Task.findOne({ _id: taskId, organizationId: req.user.organizationId });
     if (!task) {
       return res.status(404).json({ success: false, message: 'Task not found' });
     }
@@ -188,41 +194,10 @@ return res.json({
   }
 });
  
-
-router.get('/:id', async (req, res) => {
-  try {
- 
-    const task = await Task.findById(req.params.id)
-      .populate([
-        { path: 'assignedTo', select: 'email role' },
-        { path: 'createdBy', select: 'email role' }
-      ]);
- 
-    if (!task) {
-      return res.status(404).json({
-        success: false,
-        message: 'Task not found'
-      });
-    }
- 
-    res.status(200).json({
-      success: true,
-      task
-    });
- 
-  } catch (error) {
-    console.error('Get Single Task Error:', error);
- 
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
-  }
-});
  
 
 
-router.put('/:id', async (req, res) => {
+router.put('/:taskId', async (req, res) => {
   try {
  
     const { title, description, dueDate, urgencyColor, status } = req.body;
@@ -270,9 +245,9 @@ router.put('/:id', async (req, res) => {
 
 
  
-router.delete('/:id', authorize('manager'), async (req, res) => {
+router.delete('/:taskId', authorize('manager'), async (req, res) => {
   try {
-    const task = await Task.findById(req.params.id);
+    const task = await Task.findOne({ _id: req.params.taskId, organizationId: req.user.organizationId });
  
     if (!task) {
       return res.status(404).json({

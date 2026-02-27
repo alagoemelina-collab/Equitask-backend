@@ -6,6 +6,7 @@ const morgan = require('morgan');
  
 dotenv.config();
  
+const orgRoutes = require('./routes/org');
 const proofRoutes = require('./routes/proof');
 const notificationRoutes = require('./routes/notifications');
 const focusRoutes = require('./routes/focus');
@@ -14,6 +15,7 @@ const taskRoutes = require('./routes/tasks');
 const aiRoutes = require('./routes/ai');
 const connectDB = require('./config/database');
 const twoFactorRoutes = require('./routes/twoFactors');
+const googleAuthRoutes = require('./routes/googleAuth');
  
 const app = express();
 app.use(morgan('dev')); 
@@ -29,13 +31,13 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
  
 if (process.env.NODE_ENV === 'development') {
-  app.use((req, res, next) => {
+  app.use((req, _res, next) => {
     console.log(`${req.method} ${req.path}`);
     next();
   });
 }
  
-app.get('/', (req, res) => {
+app.get('/', (_req, res) => {
   res.json({
     success: true,
     message: 'EquiTask AI API is running',
@@ -47,7 +49,13 @@ app.get('/', (req, res) => {
   });
 });
  
+app.use((req, _res, next) => {
+  console.log("REQ", req.method, req.originalUrl);
+  next();
+});
 
+
+app.use('/api/org', orgRoutes);
 app.use('/api/proof', proofRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/auth', authRoutes);
@@ -55,17 +63,18 @@ app.use('/api/tasks', taskRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/focus', focusRoutes);
 app.use('/api/2fa', twoFactorRoutes);
+app.use('/api/auth/google', googleAuthRoutes);
 
 app.use("/uploads", express.static("uploads"));
 
-app.use((req, res) => {
+app.use((_req, res) => {
   res.status(404).json({
     success: false,
     message: 'Route not found'
   });
 });
  
-app.use((err, req, res, next) => {
+app.use((err, __req, res, _next) => {
   console.error('Error:', err);
  
   res.status(err.statusCode || 500).json({

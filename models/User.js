@@ -2,6 +2,11 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
  
 const userSchema = new mongoose.Schema({
+  fullName: {
+    type: String,
+    required: [true, 'Full name is required'],
+    trim: true
+  },
   email: {
     type: String,
     required: [true, 'Email is required'],
@@ -12,9 +17,14 @@ const userSchema = new mongoose.Schema({
   },
   password: {
     type: String,
-    required: [true, 'Password is required'],
+    required: function() { return this.authProvider === 'local'; }, // Only required for local auth
     minlength: [6, 'Password must be at least 6 characters'],
     select: false
+  },
+  authProvider: {
+    type: String,
+    enum: ['local', 'google'],
+    default: 'local'
   },
   role: {
     type: String,
@@ -25,6 +35,17 @@ const userSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
+  organizationId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Organization',
+    default: null
+  },
+  isActive: {
+    type: Boolean,
+    default: true
+  },
+  resetPasswordToken: {type: String},
+  resetPasswordExpire: {type: Date},
   
   // 2FA FIELDS - TOTP (Authenticator App)
   twoFactorEnabled: {
@@ -34,7 +55,9 @@ const userSchema = new mongoose.Schema({
   twoFactorSecret: {
     type: String,
     select: false // Don't return by default for security
-  }
+  },
+  
+
 }, {
   timestamps: true
 });

@@ -32,7 +32,13 @@ const taskSchema = new mongoose.Schema(
       required: true,
       trim: true
     },
- 
+  
+    organizationId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Organization',
+        required: true
+      },
+      
     status: {
       type: String,
       enum: ['not_started', 'in_progress', 'completed'],
@@ -65,7 +71,7 @@ const taskSchema = new mongoose.Schema(
       ref: 'User'
     },
  
-    // 🔥 AI Generated Breakdown
+    //  AI Generated Breakdown
     simplifiedSteps: {
       type: [stepSchema],
       default: []
