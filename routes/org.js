@@ -49,6 +49,65 @@ router.post("/", requireManager, async (req, res) => {
  
 
 
+// EMPLOYEE: join organisation using invite code
+router.post("/join", protect, async (req, res) => {
+  try {
+    const { code } = req.body;
+ 
+    if (!code) {
+      return res.status(400).json({
+        success: false,
+        message: "Invite code is required"
+      });
+    }
+ 
+    const invite = await Invite.findOne({ code });
+ 
+    if (!invite) {
+      return res.status(404).json({
+        success: false,
+        message: "Invite not found"
+      });
+    }
+ 
+    if (invite.status !== "pending") {
+      return res.status(400).json({
+        success: false,
+        message: "Invite already used"
+      });
+    }
+ 
+    if (new Date(invite.expiresAt) < new Date()) {
+      return res.status(400).json({
+        success: false,
+        message: "Invite expired"
+      });
+    }
+ 
+    const user = await User.findById(req.user._id);
+ 
+    user.organizationId = invite.organizationId;
+    user.role = "employee";
+    await user.save();
+ 
+    invite.status = "accepted";
+    invite.usedBy = user._id;
+    await invite.save();
+ 
+    return res.json({
+      success: true,
+      message: "Successfully joined organisation",
+      user
+    });
+ 
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: err.message
+    });
+  }
+});
+ 
 
 
 // 2) Create invite code (manager)
