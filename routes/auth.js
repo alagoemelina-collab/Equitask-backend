@@ -256,6 +256,44 @@ if (finalRole === "employee") {
     return res.status(500).json({ success: false, message: "Server error" });
   }
 });
+
+
+// GET /api/auth/users - List all users (for testing/debugging)
+router.get('/users', protect, async (req, res) => {
+  try {
+    // Only allow managers to see all users
+    if (req.user.role !== 'manager') {
+      return res.status(403).json({
+        success: false,
+        message: 'Only managers can view all users'
+      });
+    }
+ 
+    const users = await User.find({})
+      .select('-password') // Don't return passwords!
+      .sort({ createdAt: -1 }); // Newest first
+ 
+    res.json({
+      success: true,
+      count: users.length,
+      users: users.map(user => ({
+        id: user._id,
+        email: user.email,
+        role: user.role,
+        twoFactorEnabled: user.twoFactorEnabled || false,
+        createdAt: user.createdAt
+      }))
+    });
+ 
+  } catch (error) {
+    console.error('Get Users Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+});
+ 
  
  
  

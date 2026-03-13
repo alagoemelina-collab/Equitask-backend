@@ -50,7 +50,7 @@ router.post("/", requireManager, async (req, res) => {
 
 
 // EMPLOYEE: join organisation using invite code
-router.post("/join", protect, async (req, res) => {
+router.post("/join", async (req, res) => {
   try {
     const { code } = req.body;
  

@@ -3,6 +3,10 @@
  
 Backend service for EquiTask AI: task creation, assignment, proof submission (text/file), review workflow (approve/reject), notifications, authentication (JWT) and optional 2FA.
  
+
+ To get your ngrok running you do:
+ -cd ngrok-v3-stable-windows-amd64
+ -npm ngrok http 5000 
 ---
  
 ## ✅ Features

@@ -14,7 +14,7 @@ exports.protect = async (req, res, next) => {
       message: 'Not authorized to access this route. Please login.'
     });
   }
- 
+ console.log("AUTH TOKEN:", token);
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
