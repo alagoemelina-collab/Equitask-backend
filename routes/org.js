@@ -1,28 +1,135 @@
 const express = require("express");
-const crypto = require("crypto");
 const Organization = require("../models/Organization");
 const Invite = require("../models/Invite");
-const { protect } = require("../middleware/auth"); // use your existing protect
+const { protect } = require("../middleware/auth");
 const User = require("../models/User");
  
 const router = express.Router();
- router.use(protect); // all routes require auth
-// helper: allow only manager
+ 
+/**
+ * PUBLIC: Validate invite code before employee registers
+ * GET /api/org/invite/:code
+ */
+router.get("/invite/:code", async (req, res) => {
+  try {
+    const inviteCode = (req.params.code || "").trim();
+ 
+    console.log("REQ GET /api/org/invite/:code");
+    console.log("INVITE CODE PARAM:", inviteCode);
+ 
+    if (!inviteCode) {
+      return res.status(400).json({
+        success: false,
+        message: "Invite code is required",
+      });
+    }
+ 
+    const invite = await Invite.findOne({
+      code: inviteCode,
+      status: "pending",
+      expiresAt: { $gt: new Date() },
+    });
+ 
+    console.log("PUBLIC INVITE CHECK FOUND:", invite);
+ 
+    if (!invite) {
+      return res.status(404).json({
+        success: false,
+        message: "Invalid or expired invite code",
+      });
+    }
+ 
+    return res.status(200).json({
+      success: true,
+      invite: {
+        code: invite.code,
+        organizationId: invite.organizationId,
+        role: invite.role,
+        expiresAt: invite.expiresAt,
+        status: invite.status,
+      },
+    });
+  } catch (err) {
+    console.log("PUBLIC INVITE CHECK ERROR:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+});
+ 
+/**
+ * Everything below requires login
+ */
+router.use(protect);
+ 
+/**
+ * Helper: allow only manager
+ */
 const requireManager = (req, res, next) => {
+  console.log("REQ USER ROLE:", req.user.role);
+  console.log("REQ USER:", req.user);
+ 
   if (req.user.role !== "manager") {
-    return res.status(403).json({ success: false, message: "Forbidden: manager only" });
+    return res.status(403).json({
+      success: false,
+      message: "Forbidden: manager only"
+    });
   }
   next();
 };
  
-// 1) Create organization (manager)
-// rotect);
+
+
+router.get("/members", protect, async (req, res) => {
+  try {
+    if (!req.user.organizationId) {
+      return res.status(200).json({
+        success: true,
+        members: [],
+      });
+    }
  
+    const members = await User.find({
+      organizationId: req.user.organizationId,
+      isActive: true,
+    }).select("_id fullName email role organizationId");
+ 
+    return res.status(200).json({
+      success: true,
+      members: members.map((user) => ({
+        id: user._id,
+        _id: user._id,
+        fullName: user.fullName || "",
+        name: user.fullName || "",
+        email: user.email || "",
+        role: user.role || "regular",
+        organizationId: user.organizationId || null,
+      })),
+    });
+  } catch (err) {
+    console.log("GET ORG MEMBERS ERROR:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Server error while fetching organization members",
+    });
+  }
+});
+ 
+ 
+/**
+ * Create organization (manager)
+ * POST /api/org
+ */
 router.post("/", requireManager, async (req, res) => {
   try {
     const { name } = req.body;
+ 
     if (!name) {
-      return res.status(400).json({ success: false, message: "Organization name is required" });
+      return res.status(400).json({
+        success: false,
+        message: "Organization name is required",
+      });
     }
  
     const org = await Organization.create({
@@ -30,61 +137,80 @@ router.post("/", requireManager, async (req, res) => {
       createdBy: req.user._id,
     });
  
-    // ✅ attach org to manager
     await User.findByIdAndUpdate(
       req.user._id,
       { $set: { organizationId: org._id } },
       { new: true }
     );
  
-    return res.json({
+    return res.status(200).json({
       success: true,
-      organization: { id: org._id, name: org.name },
+      organization: {
+        id: org._id,
+        name: org.name,
+      },
     });
   } catch (err) {
     console.log("CREATE ORG ERROR:", err);
-    return res.status(500).json({ success: false, message: "Server error" });
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
   }
 });
  
-
-
-// EMPLOYEE: join organisation using invite code
+/**
+ * Employee joins organization using invite code
+ * This is only for an already logged-in user
+ * POST /api/org/join
+ */
 router.post("/join", async (req, res) => {
   try {
-    const { code } = req.body;
+    const inviteCode = (req.body.inviteCode || "").trim();
  
-    if (!code) {
+    console.log("JOIN BODY:", req.body);
+    console.log("JOIN INVITE CODE:", inviteCode);
+ 
+    if (!inviteCode) {
       return res.status(400).json({
         success: false,
-        message: "Invite code is required"
+        message: "Invite code is required",
       });
     }
  
-    const invite = await Invite.findOne({ code });
+    const invite = await Invite.findOne({ code: inviteCode });
+ 
+    console.log("JOIN FOUND INVITE:", invite);
  
     if (!invite) {
       return res.status(404).json({
         success: false,
-        message: "Invite not found"
+        message: "Invite not found",
       });
     }
  
     if (invite.status !== "pending") {
       return res.status(400).json({
         success: false,
-        message: "Invite already used"
+        message: "Invite already used",
       });
     }
  
     if (new Date(invite.expiresAt) < new Date()) {
       return res.status(400).json({
         success: false,
-        message: "Invite expired"
+        message: "Invite expired",
       });
     }
  
     const user = await User.findById(req.user._id);
+ 
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
  
     user.organizationId = invite.organizationId;
     user.role = "employee";
@@ -94,50 +220,84 @@ router.post("/join", async (req, res) => {
     invite.usedBy = user._id;
     await invite.save();
  
-    return res.json({
+    return res.status(200).json({
       success: true,
       message: "Successfully joined organisation",
-      user
+      user: {
+        id: user._id,
+        email: user.email,
+        role: user.role,
+        organizationId: user.organizationId,
+      },
     });
- 
   } catch (err) {
+    console.log("JOIN ORG ERROR:", err);
     return res.status(500).json({
       success: false,
-      message: err.message
+      message: err.message || "Server error",
     });
   }
 });
  
-
-
-// 2) Create invite code (manager)
-router.post("/invites", protect, requireManager, async (req, res) => {
-  console.log("INVITE REQ USER:", req.user._id, req.user.email, req.user.organizationId);
-  const { expiresInHours = 48 } = req.body;
+/**
+ * Create invite code (manager)
+ * POST /api/org/invites
+ */
+router.post("/invites", requireManager, async (req, res) => {
+  try {
+    console.log(
+      "INVITE REQ USER:",
+      req.user._id,
+      req.user.email,
+      req.user.organizationId
+    );
  
-  if (!req.user.organizationId) {
-    return res.status(422).json({ success: false, message: "Manager has no organization yet" });
+    const { expiresInHours = 48 } = req.body;
+ 
+    if (!req.user.organizationId) {
+      return res.status(422).json({
+        success: false,
+        message: "Manager has no organization yet",
+      });
+    }
+ 
+    let code;
+    let exists = true;
+ 
+    while (exists) {
+      code = `EQT-INV-${Math.floor(1000 + Math.random() * 9000)}`;
+      exists = await Invite.findOne({ code });
+    }
+ 
+    const expiresAt = new Date(
+      Date.now() + Number(expiresInHours) * 60 * 60 * 1000
+    );
+ 
+    const invite = await Invite.create({
+      code,
+      organizationId: req.user.organizationId,
+      role: "employee",
+      expiresAt,
+    });
+ 
+    console.log("INVITE CREATED:", invite);
+ 
+    return res.status(200).json({
+      success: true,
+      invite: {
+        code: invite.code,
+        organizationId: invite.organizationId,
+        expiresAt: invite.expiresAt,
+        status: invite.status,
+      },
+    });
+  } catch (err) {
+    console.log("CREATE INVITE ERROR:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
   }
- 
-  const code = crypto.randomBytes(4).toString("hex"); // e.g. "a1b2c3d4"
-  const expiresAt = new Date(Date.now() + Number(expiresInHours) * 60 * 60 * 1000);
- 
-  const invite = await Invite.create({
-    code,
-    organizationId: req.user.organizationId,
-    role: "employee",
-    expiresAt,
-  });
- 
-  res.json({
-    success: true,
-    invite: {
-      code: invite.code,
-      organizationId: invite.organizationId,
-      expiresAt: invite.expiresAt,
-      status: invite.status,
-    },
-  });
 });
  
 module.exports = router;

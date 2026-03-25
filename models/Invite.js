@@ -13,6 +13,12 @@ const inviteSchema = new mongoose.Schema(
       enum: ["employee"],
       default: "employee",
     },
+    email: {
+      type: string,
+      lowercase: true,
+      trim: true,
+      default: null,
+    },
     status: {
       type: String,
       enum: ["pending", "accepted"],
