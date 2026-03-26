@@ -1,22 +1,35 @@
- // routes/auth.js
+// routes/auth.js
 const express = require("express");
-const router = express.Router();
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const { OAuth2Client } = require("google-auth-library");
+const Organization = require("../models/Organization")
 const User = require("../models/User");
-const {protect} = require("../middleware/auth");
- const Invite = require("../models/Invite");
- const generateToken = require("../utils/generateToken");
- const { OAuth2Client } = require("google-auth-library");
- const {forgotPassword, resetPassword} = require("../controllers/passwordController");
+const Invite = require("../models/Invite");
+const { protect } = require("../middleware/auth");
+const generateToken = require("../utils/generateToken");
+const {
+  forgotPassword,
+  resetPassword,
+} = require("../controllers/passwordController");
+ 
+const router = express.Router();
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
+function getAllowedGoogleAudiences() {
+  return [
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_ANDROID_CLIENT_ID,
+    process.env.GOOGLE_IOS_CLIENT_ID,
+  ].filter(Boolean);
+}
  
 router.post("/forgot-password", forgotPassword);
 router.post("/reset-password/:token", resetPassword);
  
 /**
  * POST /api/auth/login
- * Body: { "email": "...", "password": "..." }
+ * Body: { email, password }
  */
 router.post("/login", async (req, res) => {
   console.log("LOGIN ROUTE HIT:", req.body);
@@ -25,44 +38,52 @@ router.post("/login", async (req, res) => {
     const { email, password } = req.body;
  
     if (!email || !password) {
-      return res.status(400).json({ success: false, message: "Please provide email and password" });
+      return res.status(400).json({
+        success: false,
+        message: "Please provide email and password",
+      });
     }
  
     const user = await User.findOne({ email }).select("+password +twoFactorSecret");
-
-//     console.log("User found:", user); it helps you see if the user is found and what data is retrieved, especially the password hash and 2FA secret. You can comment it out after debugging.
-// console.log("Entered password:", password);
-// console.log("Stored hash:", user?.password); 
  
+    console.log("USER FOUND:", !!user);
+    console.log("LOGIN EMAIL:", email);
+    console.log("USER RECORD:", user);
  
     if (!user) {
-      return res.status(401).json({ success: false, message: "Invalid email or password" });
+      return res.status(401).json({
+        success: false,
+        message: "Invalid email or password",
+      });
     }
  
     const isPasswordCorrect = await bcrypt.compare(password, user.password);
  
+    console.log("PASSWORD MATCH:", isPasswordCorrect);
+ 
     if (!isPasswordCorrect) {
-      return res.status(401).json({ success: false, message: "Invalid email or password" });
+      return res.status(401).json({
+        success: false,
+        message: "Invalid email or password",
+      });
     }
-
-   if (user.role === "employee") {
-  if (!user.organizationId) {
-    return res.status(403).json({
-      success: false,
-      message: "Not invited / not part of organization",
-    });
-  }
  
-  if (user.isActive === false) {
-    return res.status(403).json({
-      success: false,
-      message: "Account inactive",
-    });
-  }
-}
-
+    if (user.role === "employee") {
+      if (!user.organizationId) {
+        return res.status(403).json({
+          success: false,
+          message: "Not invited / not part of organization",
+        });
+      }
  
-    // If 2FA enabled, return tempToken
+      if (user.isActive === false) {
+        return res.status(403).json({
+          success: false,
+          message: "Account inactive",
+        });
+      }
+    }
+ 
     if (user.twoFactorEnabled) {
       const tempToken = jwt.sign(
         { id: user._id, type: "2fa" },
@@ -78,7 +99,6 @@ router.post("/login", async (req, res) => {
       });
     }
  
-    // Otherwise normal login token
     const token = jwt.sign(
       { id: user._id, role: user.role },
       process.env.JWT_SECRET,
@@ -89,60 +109,123 @@ router.post("/login", async (req, res) => {
       success: true,
       message: "Login successful",
       token,
-      user: { 
-        id: user._id, 
-        email: user.email, 
+      user: {
+        id: user._id,
+        email: user.email,
         role: user.role,
-      organizationId: user.organizationId},
+        organizationId: user.organizationId,
+      },
     });
   } catch (error) {
-    console.error("Login Error:", error);
-    return res.status(500).json({ success: false, message: "Server error during login" });
+    console.error("LOGIN ERROR:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error during login",
+    });
   }
 });
 
-// GET /api/auth/me (protected)
+
+router.post("/logout", protect, async (req, res) => {
+  return res.status(200).json({
+    success: true,
+    message: "Logout successful",
+  });
+});
+ 
+
+router.get("/settings", protect, async (req, res) => {
+  try {
+    return res.status(200).json({
+      success: true,
+      settings: {
+        notifications: true,
+        darkMode: false,
+        accessibilityMode: false,
+        role: req.user.role,
+        email: req.user.email,
+        fullName: req.user.fullName || "",
+      },
+    });
+  } catch (error) {
+    console.error("SETTINGS ERROR:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error while fetching settings",
+    });
+  }
+});
+ 
+ 
+/**
+ * GET /api/auth/me
+ */
 router.get("/me", protect, async (req, res) => {
   return res.status(200).json({
     success: true,
     user: req.user,
   });
 });
-
-
  
+/**
+ * POST /api/auth/google
+ * Body: { idToken }
+ */
 router.post("/google", async (req, res) => {
   try {
     const { idToken } = req.body;
  
     if (!idToken) {
-      return res.status(400).json({ success: false, message: "Google token required" });
+      return res.status(400).json({
+        success: false,
+        message: "Google token required",
+      });
     }
  
+    const decoded = jwt.decode(idToken);
+    const allowedAudiences = getAllowedGoogleAudiences();
+    const tokenAudience = decoded?.aud;
+    const authorizedParty = decoded?.azp;
+
+    if (!allowedAudiences.length) {
+      return res.status(500).json({
+        success: false,
+        message: "Google OAuth is not configured on the server",
+      });
+    }
+
+    if (
+      !tokenAudience ||
+      (!allowedAudiences.includes(tokenAudience) &&
+        (!authorizedParty || !allowedAudiences.includes(authorizedParty)))
+    ) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid Google token audience",
+      });
+    }
+
     const ticket = await client.verifyIdToken({
       idToken,
-      audience: process.env.GOOGLE_CLIENT_ID,
+      audience: tokenAudience,
     });
  
     const payload = ticket.getPayload();
     const { email, name } = payload;
  
-    // 1) find existing user
     let user = await User.findOne({ email });
  
-    // 2) if user doesn't exist, create one
     if (!user) {
       user = await User.create({
         fullName: name,
         email,
-        password: "google_oauth_user", // (or random string)
+        password: "google_oauth_user",
         role: "regular",
         isActive: true,
       });
     }
  
-    // 3) return YOUR jwt
-    const token = generateToken(user._id);
+    const token = generateToken(user._id, user.role);
  
     return res.status(200).json({
       success: true,
@@ -156,41 +239,53 @@ router.post("/google", async (req, res) => {
       },
     });
   } catch (err) {
-    return res.status(401).json({ success: false, message: "Invalid Google token" });
+    console.log("GOOGLE LOGIN ERROR:", err);
+    return res.status(401).json({
+      success: false,
+      message: "Invalid Google token",
+    });
   }
 });
  
-
-
-
-
+/**
+ * POST /api/auth/register
+ * POST /api/auth/signup
+ */
 router.post(["/register", "/signup"], async (req, res) => {
   try {
-    const { fullName, email, password, role } = req.body;
-    //normalize role
-    const roleRaw = req.body.role;
-    const roleNormalized = (roleRaw || "reguler").toLowerCase();
+    const { fullName, email, password } = req.body;
 
+    const normalizedEmail = (email || "").trim().toLowerCase();
+
+    const roleRaw = req.body.role;
+    const roleNormalized = (roleRaw || "regular").toLowerCase();
+ 
     const roleMap = {
       user: "regular",
       staff: "employee",
       employee: "employee",
       manager: "manager",
     };
-
+ 
     const finalRole = roleMap[roleNormalized] || "regular";
  
+    console.log("REGISTER BODY:", req.body);
+    console.log("ROLE RAW:", roleRaw);
+    console.log("ROLE:", finalRole);
+    console.log("INVITE CODE RECEIVED:", req.body.inviteCode);
+ 
     if (!fullName || !email || !password) {
-      return res.status(400).json({ success: false, message: "Full name, email and password are required" });
+      return res.status(400).json({
+        success: false,
+        message: "Full name, email and password are required",
+      });
     }
-
-
-    
  
-let organizationId = null;
+    let organizationId = null;
+    let inviteCode = "";
  
-if (finalRole === "employee") {
-  const inviteCode = (req.body.inviteCode || "").trim();
+    if (finalRole === "employee") {
+  inviteCode = (req.body.inviteCode || "").trim();
  
   if (!inviteCode) {
     return res.status(422).json({
@@ -199,107 +294,139 @@ if (finalRole === "employee") {
     });
   }
  
-  const invite = await Invite.findOne({ 
+  matchedInvite = await Invite.findOne({
     code: inviteCode,
-  status: "pending",
-    expiresAt: { $gt: new Date() }
+    status: "pending",
+    expiresAt: { $gt: new Date() },
+    $or: [
+      { email: normalizedEmail },
+      { email: null },
+      { email: { $exists: false } },
+    ],
   });
  
-  if (!invite) {
+  console.log("FOUND INVITE:", matchedInvite);
+ 
+  if (!matchedInvite) {
     return res.status(422).json({
       success: false,
       message: "Invalid or expired invite code",
     });
   }
  
-  organizationId = invite.organizationId;
+  organizationId = matchedInvite.organizationId;
 }
+ 
  
     const existing = await User.findOne({ email });
     if (existing) {
-      return res.status(409).json({ success: false, message: "User already exists" });
+      return res.status(409).json({
+        success: false,
+        message: "User already exists",
+      });
     }
  
-    //const hashedPassword = await bcrypt.hash(password, 10);
+   const user = await User.create({
+  fullName,
+  email: normalizedEmail,
+  password,
+  role: finalRole,
+  organizationId,
+  isActive: true,
+  twoFactorEnabled: false,
+});
  
-    const user = await User.create({
-      fullName,
-      email,
-      password,// The pre-save hook in User.js will handle hashing
-      role: finalRole,
-      organizationId,
-      isActive: true,
-      twoFactorEnabled: false
-    });
-
+if (user.role === "manager" && !user.organizationId) {
+  const org = await Organization.create({
+    name: `${user.fullName}'s Organization`,
+    createdBy: user._id,
+  });
+ 
+  user.organizationId = org._id;
+  await user.save();
+ 
+  console.log("AUTO ORG CREATED FOR MANAGER:", {
+    orgId: org._id,
+    orgName: org.name,
+    userId: user._id,
+  });
+}
+ 
+console.log("USER CREATED SUCCESSFULLY:", {
+  id: user._id,
+  email: user.email,
+  role: user.role,
+  organizationId: user.organizationId,
+});
+ 
+if (finalRole === "employee" && matchedInvite) {
+  await Invite.updateOne(
+    { _id: matchedInvite._id },
+    { status: "accepted", usedBy: user._id }
+  );
+ 
+  console.log("INVITE UPDATED TO ACCEPTED:", inviteCode);
+}
+ 
+ 
     const token = generateToken(user._id, user.role);
- 
-    if (finalRole === "employee") {
-      await Invite.updateOne(
-        { code: req.body.inviteCode },
-        { status: "accepted", usedBy: user._id }
-      );
-    }
  
     return res.status(201).json({
       success: true,
       message: "Registration successful",
       token,
-      user: { 
-        id: user._id, 
+      user: {
+        id: user._id,
         email: user.email,
         role: user.role,
-        organizationId: user.organizationId }
+        organizationId: user.organizationId,
+      },
     });
   } catch (err) {
     console.log("REGISTER ERROR:", err);
-    return res.status(500).json({ success: false, message: "Server error" });
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
   }
 });
-
-
-// GET /api/auth/users - List all users (for testing/debugging)
-router.get('/users', protect, async (req, res) => {
+ 
+/**
+ * GET /api/auth/users
+ * Manager only
+ */
+router.get("/users", protect, async (req, res) => {
   try {
-    // Only allow managers to see all users
-    if (req.user.role !== 'manager') {
+    if (req.user.role !== "manager") {
       return res.status(403).json({
         success: false,
-        message: 'Only managers can view all users'
+        message: "Only managers can view all users",
       });
     }
  
     const users = await User.find({})
-      .select('-password') // Don't return passwords!
-      .sort({ createdAt: -1 }); // Newest first
+      .select("-password")
+      .sort({ createdAt: -1 });
  
-    res.json({
+    return res.json({
       success: true,
       count: users.length,
-      users: users.map(user => ({
+      users: users.map((user) => ({
         id: user._id,
         email: user.email,
         role: user.role,
         twoFactorEnabled: user.twoFactorEnabled || false,
-        createdAt: user.createdAt
-      }))
+        createdAt: user.createdAt,
+      })),
     });
- 
   } catch (error) {
-    console.error('Get Users Error:', error);
-    res.status(500).json({
+    console.error("GET USERS ERROR:", error);
+    return res.status(500).json({
       success: false,
-      message: 'Server error'
+      message: "Server error",
     });
   }
 });
  
- 
- 
- 
 module.exports = router;
- 
-
-// const bcrypt = require("bcrypt");
-//bcrypt.hash("the user password", 10).then(console.log); it helps you generate a hash for a password to store in the database. You can run this in a separate script or REPL to get the hash value, then use that hash when creating users directly in the database for testing purposes.
  

@@ -1,5 +1,7 @@
 const express = require("express");
 const { OAuth2Client } = require("google-auth-library");
+const jwt = require("jsonwebtoken");
+ 
 const User = require("../models/User");
 const generateToken = require("../utils/generateToken");
  
@@ -9,45 +11,81 @@ const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
  
 router.post("/", async (req, res) => {
   try {
-    const { idToken } = req.body;
+    const { idToken, token, accessToken } = req.body;
  
-    if (!idToken) {
-      return res.status(400).json({ success: false, message: "idToken is required" });
+    const googleToken = idToken || token || accessToken;
+ 
+    console.log("GOOGLE AUTH BODY:", req.body);
+    console.log("GOOGLE TOKEN PRESENT:", !!googleToken);
+ 
+    if (!googleToken) {
+      return res.status(400).json({
+        success: false,
+        message: "Google token is required",
+      });
     }
  
-    // verify token from Google
+    const decoded = jwt.decode(googleToken);
+    console.log("DECODED GOOGLE TOKEN:", decoded);
+ 
+    const allowedAudiences = [
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_ANDROID_CLIENT_ID,
+      process.env.GOOGLE_IOS_CLIENT_ID,
+    ].filter(Boolean);
+ 
     const ticket = await client.verifyIdToken({
-      idToken,
-      audience: process.env.GOOGLE_CLIENT_ID,
+      idToken: googleToken,
+      audience: allowedAudiences,
     });
+
+    console.log("ENV GOOGLE_CLIENT_ID:", process.env.GOOGLE_CLIENT_ID);
+console.log("ENV GOOGLE_ANDROID_CLIENT_ID:", process.env.GOOGLE_ANDROID_CLIENT_ID);
+ 
  
     const payload = ticket.getPayload();
+    console.log("VERIFIED GOOGLE PAYLOAD:", payload);
+ 
     const email = payload.email;
     const fullName = payload.name || "Google User";
  
     if (!email) {
-      return res.status(400).json({ success: false, message: "Google token has no email" });
+      return res.status(400).json({
+        success: false,
+        message: "Google token has no email",
+      });
     }
  
-    // find or create user
     let user = await User.findOne({ email });
  
     if (!user) {
       user = await User.create({
         fullName,
         email,
-        authProvider: "google", // or leave out if your schema allows
-        role: "regular",        // set your default role
+        authProvider: "google",
+        role: "regular",
         isActive: true,
+      });
+ 
+      console.log("GOOGLE USER CREATED:", {
+        id: user._id,
+        email: user.email,
+        role: user.role,
+      });
+    } else {
+      console.log("GOOGLE USER FOUND:", {
+        id: user._id,
+        email: user.email,
+        role: user.role,
       });
     }
  
-    const token = generateToken(user._id);
+    const tokenOut = generateToken(user._id, user.role);
  
     return res.status(200).json({
       success: true,
       message: "Google login successful",
-      token,
+      token: tokenOut,
       user: {
         id: user._id,
         email: user.email,
@@ -57,7 +95,12 @@ router.post("/", async (req, res) => {
     });
   } catch (err) {
     console.log("GOOGLE AUTH ERROR:", err);
-    return res.status(401).json({ success: false, message: "Invalid Google token" });
+ 
+    return res.status(401).json({
+      success: false,
+      message: "Invalid Google token",
+      error: err.message,
+    });
   }
 });
  
