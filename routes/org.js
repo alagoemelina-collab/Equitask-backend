@@ -4,7 +4,7 @@ const Invite = require("../models/Invite");
 const Notification = require("../models/Notification");
 const { protect } = require("../middleware/auth");
 const User = require("../models/User");
-const { sendInviteEmail } = require("../utils/emailService");
+const { sendInviteEmail } = require("../utils/emailservice");
  
 const router = express.Router();
  
@@ -286,7 +286,6 @@ router.post("/join", async (req, res) => {
   }
 });
  
- 
 /**
  * Create invite code (manager)
  * POST /api/org/invites
@@ -349,56 +348,18 @@ router.post("/invites", requireManager, async (req, res) => {
       organizationId: invite.organizationId,
       isRead: false,
     });
-
+ 
     const emailResult = await sendInviteEmail(
-normalizedEmail,
-invite.code,
-organization?.name || "an organization",
-invite.expiresAt
-);
+      normalizedEmail,
+      invite.code,
+      organization?.name || "an organization",
+      invite.expiresAt
+    );
  
-if (!emailResult.success) {
-console.log("INVITE EMAIL ERROR:", emailResult.error);
-} else {
-console.log("INVITE EMAIL SENT TO:", normalizedEmail);
-}
- 
- 
-    const subject = "You’ve been invited to join EquiTask";
- 
-    const text = `
-Hello,
- 
-You have been invited to join ${organization?.name || "an organization"} on EquiTask.
- 
-Your invite code: ${invite.code}
- 
-This code expires on: ${invite.expiresAt}
- 
-If you were not expecting this invite, please ignore this email.
-    `.trim();
- 
-    const html = `
-      <div style="font-family: Arial, sans-serif; line-height: 1.6;">
-        <h2>You’ve been invited to join EquiTask</h2>
-        <p>Hello,</p>
-        <p>You have been invited to join <strong>${organization?.name || "an organization"}</strong>.</p>
-        <p><strong>Invite code:</strong> ${invite.code}</p>
-        <p><strong>Expires on:</strong> ${invite.expiresAt}</p>
-        <p>If you were not expecting this invite, please ignore this email.</p>
-      </div>
-    `;
- 
-    try {
-      await sendEmail({
-        to: normalizedEmail,
-        subject,
-        text,
-        html,
-      });
+    if (!emailResult.success) {
+      console.log("INVITE EMAIL ERROR:", emailResult.error);
+    } else {
       console.log("INVITE EMAIL SENT TO:", normalizedEmail);
-    } catch (emailError) {
-      console.log("INVITE EMAIL ERROR:", emailError);
     }
  
     console.log("INVITE CREATED:", invite);
