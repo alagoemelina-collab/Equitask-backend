@@ -3,7 +3,7 @@ const express = require("express");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { OAuth2Client } = require("google-auth-library");
- 
+const Organization = require("../models/Organization")
 const User = require("../models/User");
 const Invite = require("../models/Invite");
 const { protect } = require("../middleware/auth");
@@ -254,7 +254,9 @@ router.post("/google", async (req, res) => {
 router.post(["/register", "/signup"], async (req, res) => {
   try {
     const { fullName, email, password } = req.body;
- 
+
+    const normalizedEmail = (email || "").trim().toLowerCase();
+
     const roleRaw = req.body.role;
     const roleNormalized = (roleRaw || "regular").toLowerCase();
  
@@ -283,32 +285,38 @@ router.post(["/register", "/signup"], async (req, res) => {
     let inviteCode = "";
  
     if (finalRole === "employee") {
-      inviteCode = (req.body.inviteCode || "").trim();
+  inviteCode = (req.body.inviteCode || "").trim();
  
-      if (!inviteCode) {
-        return res.status(422).json({
-          success: false,
-          message: "Invalid or expired invite code",
-        });
-      }
+  if (!inviteCode) {
+    return res.status(422).json({
+      success: false,
+      message: "Invalid or expired invite code",
+    });
+  }
  
-      const invite = await Invite.findOne({
-        code: inviteCode,
-        status: "pending",
-        expiresAt: { $gt: new Date() },
-      });
+  matchedInvite = await Invite.findOne({
+    code: inviteCode,
+    status: "pending",
+    expiresAt: { $gt: new Date() },
+    $or: [
+      { email: normalizedEmail },
+      { email: null },
+      { email: { $exists: false } },
+    ],
+  });
  
-      console.log("FOUND INVITE:", invite);
+  console.log("FOUND INVITE:", matchedInvite);
  
-      if (!invite) {
-        return res.status(422).json({
-          success: false,
-          message: "Invalid or expired invite code",
-        });
-      }
+  if (!matchedInvite) {
+    return res.status(422).json({
+      success: false,
+      message: "Invalid or expired invite code",
+    });
+  }
  
-      organizationId = invite.organizationId;
-    }
+  organizationId = matchedInvite.organizationId;
+}
+ 
  
     const existing = await User.findOne({ email });
     if (existing) {
@@ -318,31 +326,48 @@ router.post(["/register", "/signup"], async (req, res) => {
       });
     }
  
-    const user = await User.create({
-      fullName,
-      email,
-      password,
-      role: finalRole,
-      organizationId,
-      isActive: true,
-      twoFactorEnabled: false,
-    });
+   const user = await User.create({
+  fullName,
+  email: normalizedEmail,
+  password,
+  role: finalRole,
+  organizationId,
+  isActive: true,
+  twoFactorEnabled: false,
+});
  
-    console.log("USER CREATED SUCCESSFULLY:", {
-      id: user._id,
-      email: user.email,
-      role: user.role,
-      organizationId: user.organizationId,
-    });
+if (user.role === "manager" && !user.organizationId) {
+  const org = await Organization.create({
+    name: `${user.fullName}'s Organization`,
+    createdBy: user._id,
+  });
  
-    if (finalRole === "employee") {
-      await Invite.updateOne(
-        { code: inviteCode },
-        { status: "accepted", usedBy: user._id }
-      );
+  user.organizationId = org._id;
+  await user.save();
  
-      console.log("INVITE UPDATED TO ACCEPTED:", inviteCode);
-    }
+  console.log("AUTO ORG CREATED FOR MANAGER:", {
+    orgId: org._id,
+    orgName: org.name,
+    userId: user._id,
+  });
+}
+ 
+console.log("USER CREATED SUCCESSFULLY:", {
+  id: user._id,
+  email: user.email,
+  role: user.role,
+  organizationId: user.organizationId,
+});
+ 
+if (finalRole === "employee" && matchedInvite) {
+  await Invite.updateOne(
+    { _id: matchedInvite._id },
+    { status: "accepted", usedBy: user._id }
+  );
+ 
+  console.log("INVITE UPDATED TO ACCEPTED:", inviteCode);
+}
+ 
  
     const token = generateToken(user._id, user.role);
  

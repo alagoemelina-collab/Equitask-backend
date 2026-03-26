@@ -10,14 +10,76 @@ router.use(protect);
  
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL || "http://127.0.0.1:8000";
  
-// POST /api/ai/simplify-task
+function genericTemplate(taskType = "general") {
+  const type = String(taskType || "general").toLowerCase();
+ 
+  if (type === "reporting") {
+    return [
+      "Gather the needed information.",
+      "List the main points to include.",
+      "Write the first draft.",
+      "Review the report for clarity.",
+      "Correct mistakes and finalize it.",
+    ];
+  }
+ 
+  if (type === "technical") {
+    return [
+      "Describe the issue clearly.",
+      "Check the recent changes.",
+      "Try the simplest fix first.",
+      "Test the result.",
+      "Record what was done.",
+    ];
+  }
+ 
+  return [
+    "Understand the task clearly.",
+    "List what is needed.",
+    "Do the first small step.",
+    "Check progress.",
+    "Finish and confirm completion.",
+  ];
+}
+ 
+function buildTemplateResponse(taskDescription, taskType) {
+  const templateSteps = genericTemplate(taskType);
+ 
+  const simplifiedStepObjects = templateSteps.map((step, index) => ({
+    stepNumber: index + 1,
+    stepDescription: step,
+    isCompleted: false,
+  }));
+ 
+  return {
+    success: true,
+    originalTask: taskDescription,
+    status: "TEMPLATE",
+    confidenceScore: 0,
+    simplifiedSteps: templateSteps,
+    simplifiedStepObjects,
+    fallback: {
+      type: "TEMPLATE",
+      message: "AI timed out, so a starter checklist was used.",
+      templateSteps: simplifiedStepObjects.map((step) => ({
+        step_number: step.stepNumber,
+        instruction: step.stepDescription,
+      })),
+    },
+    telemetry: {
+      provider: "fallback",
+      reason: "timeout_or_ai_unavailable",
+    },
+  };
+}
+ 
 router.post("/simplify-task", async (req, res) => {
   try {
     console.log("SIMPLIFY ROUTE HIT");
     console.log("SIMPLIFY BODY:", req.body);
-    console.log("AI_SERVICE_URL:", AI_SERVICE_URL);
  
     const { taskDescription, taskId, taskType, accessibilityMode } = req.body;
+ 
     const hasValidTaskId =
       Boolean(taskId) && mongoose.Types.ObjectId.isValid(taskId);
  
@@ -35,31 +97,57 @@ router.post("/simplify-task", async (req, res) => {
       accessibility_mode: accessibilityMode || "Standard",
     };
  
+    console.log("AI_SERVICE_URL:", AI_SERVICE_URL);
     console.log("PYTHON PAYLOAD:", pythonPayload);
     console.log("BEFORE PYTHON CALL");
  
-    const pythonResponse = await axios.post(
-      `${AI_SERVICE_URL}/ai/task-simplify`,
-      pythonPayload,
-      {
-        timeout: 30000,
-        headers: {
-          "Content-Type": "application/json",
-        },
-      }
-    );
+    let aiData;
  
-    console.log("AFTER PYTHON CALL");
-    console.log("PYTHON RESPONSE DATA:", pythonResponse.data);
+    try {
+      const pythonResponse = await axios.post(
+        `${AI_SERVICE_URL}/ai/task-simplify`,
+        pythonPayload,
+        {
+          timeout: 30000,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
  
-    const aiData = pythonResponse.data;
+      aiData = pythonResponse.data;
+      console.log("PYTHON RESPONSE:", aiData);
+    } catch (error) {
+      console.log("PYTHON AI PROXY ERROR:", error.code || error.message);
+      console.log(
+        "PYTHON AI PROXY ERROR DETAILS:",
+        error.response?.data || error.message
+      );
  
-    const rawSteps =
-      aiData.simplified_steps && aiData.simplified_steps.length > 0
-        ? aiData.simplified_steps
-        : aiData.fallback?.template_steps || [];
+      const fallbackResponse = buildTemplateResponse(
+        taskDescription,
+        taskType || "reporting"
+      );
  
-    const normalizedStepObjects = rawSteps.map((step, index) => ({
+      return res.status(200).json(fallbackResponse);
+    }
+ 
+    if (
+      aiData.status !== "ACCEPT" ||
+      !Array.isArray(aiData.simplified_steps) ||
+      aiData.simplified_steps.length === 0
+    ) {
+      console.log("AI DID NOT RETURN ACCEPT. USING TEMPLATE FALLBACK.");
+ 
+      const fallbackResponse = buildTemplateResponse(
+        taskDescription,
+        taskType || "reporting"
+      );
+ 
+      return res.status(200).json(fallbackResponse);
+    }
+ 
+    const normalizedStepObjects = aiData.simplified_steps.map((step, index) => ({
       stepNumber: step.step_number || index + 1,
       stepDescription: step.instruction || "",
       isCompleted: false,
@@ -69,7 +157,6 @@ router.post("/simplify-task", async (req, res) => {
       (step) => step.stepDescription
     );
  
-    // Save structured steps into task if taskId exists
     if (hasValidTaskId) {
       const task = await Task.findById(taskId);
  
@@ -93,39 +180,27 @@ router.post("/simplify-task", async (req, res) => {
       originalTask: taskDescription,
       status: aiData.status,
       confidenceScore: aiData.confidence_score || 0,
- 
-      // this is what the APK should use
       simplifiedSteps: simplifiedStepStrings,
- 
-      // keep structured version too
       simplifiedStepObjects: normalizedStepObjects,
- 
-      fallback: aiData.fallback || null,
+      fallback: aiData.fallback || {
+        type: "NONE",
+        message: "",
+        templateSteps: [],
+      },
       telemetry: aiData.telemetry || {},
     });
   } catch (error) {
-    console.error("PYTHON AI PROXY ERROR:", error.code || error.message);
-    console.error(
-      "PYTHON AI PROXY ERROR DETAILS:",
-      error.response?.data || error.message
+    console.error("SIMPLIFY TASK ERROR:", error);
+ 
+    const fallbackResponse = buildTemplateResponse(
+      req.body?.taskDescription || "",
+      req.body?.taskType || "reporting"
     );
  
-    if (error.code === "ECONNABORTED") {
-      return res.status(504).json({
-        success: false,
-        message: "AI service timed out",
-      });
-    }
- 
-    return res.status(500).json({
-      success: false,
-      message: "Failed to connect to AI service",
-      error: error.response?.data || error.message,
-    });
+    return res.status(200).json(fallbackResponse);
   }
 });
  
-// GET /api/ai/status
 router.get("/status", async (req, res) => {
   try {
     await axios.get(`${AI_SERVICE_URL}/docs`, { timeout: 5000 });

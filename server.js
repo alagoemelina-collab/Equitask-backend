@@ -8,7 +8,7 @@ dotenv.config();
  
 const orgRoutes = require('./routes/org');
 const proofRoutes = require('./routes/proof');
-const notificationRoutes = require('./routes/notifications');
+const notificationRouter = require('./routes/notifications');
 const focusRoutes = require('./routes/focus');
 const authRoutes = require('./routes/auth');
 const taskRoutes = require('./routes/tasks');
@@ -120,7 +120,7 @@ app.use('/api/org', orgRoutes);
 app.use('/api/proof', proofRoutes);
 app.use('/api/proofs', proofRouter);
 app.use('/proof', proofRouter);
-app.use('/api/notifications', notificationRoutes);
+app.use('/api/notifications', notificationRouter);
 app.use('/api/auth', authRoutes);
 app.use('/api/tasks', taskRouter);
 app.use('/tasks', taskRouter);

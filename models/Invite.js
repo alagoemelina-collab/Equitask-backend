@@ -14,14 +14,14 @@ const inviteSchema = new mongoose.Schema(
       default: "employee",
     },
     email: {
-      type: string,
+      type: String,
       lowercase: true,
       trim: true,
-      default: null,
+      required: true,
     },
     status: {
       type: String,
-      enum: ["pending", "accepted"],
+      enum: ["pending", "accepted", "expired"],
       default: "pending",
     },
     expiresAt: { type: Date, required: true },
